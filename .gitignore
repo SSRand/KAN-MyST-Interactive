@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+.ipynb_checkpoints/
+_build/
+node_modules/
+*.log
+.jupyter/
+uv.lock

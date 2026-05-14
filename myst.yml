@@ -1,0 +1,39 @@
+# See docs at: https://mystmd.org/guide/frontmatter
+version: 1
+project:
+  title: 'KAN as a Dynamic Paper'
+  subtitle: An interactive Evidence-style paper, run locally
+  description: >-
+    Live-trainable Kolmogorov-Arnold Network paper rendered with MyST and the
+    Evidence article-theme. The page shows the Evidence reading surface and
+    Thebe-style run buttons, but compute runs against a Jupyter server on the
+    reader's own machine — Evidence's Binder is not in the loop.
+  keywords:
+    - kolmogorov-arnold networks
+    - dynamic paper
+    - reproducible publishing
+    - mystmd
+    - thebe
+  github: https://github.com/SSRand/KAN-MyST-Interactive
+  thebe:
+    # Local Jupyter server booted by ./start.sh. The token below is intentionally
+    # public — it only authorises access to a server bound to localhost.
+    server:
+      url: http://localhost:8888
+      token: kan-demo-local
+    kernelName: python3
+  numbering:
+    headings: true
+  open_access: true
+  license:
+    content: CC-BY-4.0
+    code: MIT
+  abbreviations:
+    KAN: Kolmogorov-Arnold Network
+    MLP: Multi-Layer Perceptron
+  bibliography:
+    - paper.bib
+  resources:
+    - content/kan_demo.ipynb
+site:
+  template: article-theme
