@@ -40,6 +40,16 @@ SAFE_FUNCTIONS = {
     "sqrt": torch.sqrt,
     "abs": torch.abs,
 }
+NUMPY_SAFE_FUNCTIONS = {
+    "sin": np.sin,
+    "cos": np.cos,
+    "tan": np.tan,
+    "tanh": np.tanh,
+    "exp": np.exp,
+    "log": np.log,
+    "sqrt": np.sqrt,
+    "abs": np.abs,
+}
 SAFE_NAMES = set(SAFE_FUNCTIONS) | {"x", "y", "pi", "e"}
 SAFE_NODES = (
     ast.Expression,
@@ -134,6 +144,54 @@ try:
     DEFAULT_LATEX = expression_to_latex_body(DEFAULT_EXPRESSION)
 except Exception:
     DEFAULT_LATEX = DEFAULT_EXPRESSION
+
+
+def evaluate_on_grid(
+    expression: str, n: int = 48
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Evaluate `expression` numerically on an n x n grid over [-1, 1]^2.
+
+    Returns `(xs, ys, zs)` where `xs` and `ys` are 1D length-n arrays and
+    `zs` has shape `(n, n)`. Non-finite values become NaN so heatmaps render
+    them as transparent gaps; constants broadcast to the full grid.
+
+    Validation is the same AST allowlist used by `make_target`, so this is
+    safe to call on raw user input. Used by `/coarse`'s live target preview.
+    """
+    normalised = validate_expression(expression)
+    code = compile(ast.parse(normalised, mode="eval"), "<kan-preview>", "eval")
+
+    xs = np.linspace(-1.0, 1.0, n)
+    ys = np.linspace(-1.0, 1.0, n)
+    xx, yy = np.meshgrid(xs, ys, indexing="xy")
+
+    env = {
+        **NUMPY_SAFE_FUNCTIONS,
+        "x": xx,
+        "y": yy,
+        "pi": np.pi,
+        "e": np.e,
+    }
+    with np.errstate(all="ignore"):
+        raw = eval(code, {"__builtins__": {}}, env)  # noqa: S307 — env is locked down
+
+    zs = np.broadcast_to(np.asarray(raw, dtype=float), xx.shape).copy()
+    zs[~np.isfinite(zs)] = np.nan
+    return xs, ys, zs
+
+
+def _ensure_finite(stage: str, train: list[float], test: list[float]) -> None:
+    """Raise a friendly RuntimeError if any loss is NaN or inf.
+
+    LBFGS can diverge at high `lamb` / `lamb_entropy` settings; if we don't
+    catch it here the rest of the pipeline propagates NaNs into the diagram
+    and the user only sees an opaque matplotlib failure.
+    """
+    if any(not np.isfinite(v) for v in train + test):
+        raise RuntimeError(
+            f"Training diverged at the '{stage}' stage (loss became non-finite). "
+            "Try a smaller λ or H, or fewer steps."
+        )
 
 
 def _setup() -> None:
@@ -370,15 +428,16 @@ def _try_prune(model: KAN, ckpt_dir: str) -> KAN:
 
 def train_prune(
     expression: str = DEFAULT_EXPRESSION,
-    lamb: float = 0.005,
-    lamb_entropy: float = 2.0,
-    sparse_steps: int = 25,
+    lamb: float = 0.002,
+    lamb_entropy: float = 1.0,
+    sparse_steps: int = 20,
     prune_steps: int = 15,
 ) -> dict[str, Any]:
     """Coarse → sparsify → prune → refit.
 
-    Sparsification is run with a slightly heavier penalty than `/sparsify`'s
-    default so there's something for `prune()` to actually remove.
+    Defaults mirror the upstream `kan-fulltext-demo` recipe. Higher λ / H
+    push training to diverge (loss → NaN), so we also defensively check
+    for finite losses after each `model.fit()`.
     """
     _setup()
     target = make_target(expression)
@@ -388,6 +447,7 @@ def train_prune(
 
         coarse_history = model.fit(dataset, opt="LBFGS", steps=20, log=10**9)
         coarse_train, coarse_test = _losses(coarse_history)
+        _ensure_finite("coarse", coarse_train, coarse_test)
 
         sparse_history = model.fit(
             dataset,
@@ -398,6 +458,7 @@ def train_prune(
             log=10**9,
         )
         sparse_train, sparse_test = _losses(sparse_history)
+        _ensure_finite("sparsify", sparse_train, sparse_test)
 
         pruned = _try_prune(model, ckpt_dir)
 
@@ -405,6 +466,7 @@ def train_prune(
             dataset, opt="LBFGS", steps=int(prune_steps), log=10**9
         )
         prune_train, prune_test = _losses(prune_history)
+        _ensure_finite("prune-refit", prune_train, prune_test)
 
         return {
             "train_loss": coarse_train + sparse_train + prune_train,
@@ -447,14 +509,14 @@ def _symbolic_formula(model: KAN) -> dict[str, str | None]:
 
 def train_symbolic(
     expression: str = DEFAULT_EXPRESSION,
-    lamb: float = 0.005,
-    lamb_entropy: float = 2.0,
-    sparse_steps: int = 30,
+    lamb: float = 0.002,
+    lamb_entropy: float = 1.0,
+    sparse_steps: int = 25,
 ) -> dict[str, Any]:
     """Full pipeline: coarse → sparsify → prune → refit → auto-symbolic snap.
 
-    Returns the same shape as `train_prune` plus a `formula` key carrying
-    either a LaTeX string or an error explanation.
+    Defaults mirror upstream and avoid the NaN divergence the previous
+    aggressive defaults hit.
     """
     _setup()
     target = make_target(expression)
@@ -464,6 +526,7 @@ def train_symbolic(
 
         coarse_history = model.fit(dataset, opt="LBFGS", steps=20, log=10**9)
         coarse_train, coarse_test = _losses(coarse_history)
+        _ensure_finite("coarse", coarse_train, coarse_test)
 
         sparse_history = model.fit(
             dataset,
@@ -474,10 +537,12 @@ def train_symbolic(
             log=10**9,
         )
         sparse_train, sparse_test = _losses(sparse_history)
+        _ensure_finite("sparsify", sparse_train, sparse_test)
 
         pruned = _try_prune(model, ckpt_dir)
         refit_history = pruned.fit(dataset, opt="LBFGS", steps=15, log=10**9)
         refit_train, refit_test = _losses(refit_history)
+        _ensure_finite("prune-refit", refit_train, refit_test)
 
         formula = _symbolic_formula(pruned)
 

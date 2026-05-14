@@ -18,8 +18,13 @@ import traceback
 import dash
 from dash import Input, Output, State, callback, dcc, html
 
-from figures import error_panel, loss_figure
-from kan_core import DEFAULT_EXPRESSION, expression_to_latex_body, train_coarse
+from figures import empty_figure, error_panel, loss_figure, target_surface_figure
+from kan_core import (
+    DEFAULT_EXPRESSION,
+    evaluate_on_grid,
+    expression_to_latex_body,
+    train_coarse,
+)
 
 dash.register_page(__name__, path="/coarse", title="Coarse KAN fit", name="Coarse fit")
 
@@ -72,6 +77,12 @@ layout = html.Div(
                         "color": "#0f172a",
                         "fontSize": "1.02rem",
                     },
+                ),
+                dcc.Graph(
+                    id="coarse-expr-surface",
+                    figure=empty_figure("(target preview)"),
+                    config={"displayModeBar": False},
+                    style={"marginTop": "0.4rem"},
                 ),
             ],
         ),
@@ -134,19 +145,30 @@ layout = html.Div(
 
 @callback(
     Output("coarse-expr-rendered", "children"),
+    Output("coarse-expr-surface", "figure"),
     Input("coarse-expr", "value"),
 )
-def _live_render(expression: str | None) -> str:
-    """Re-render the expression as inline MathJax on every keystroke."""
+def _live_preview(expression: str | None):
+    """Re-render the LaTeX form and the 2-D heatmap on every keystroke."""
     if not expression or not expression.strip():
-        return ""
+        return "", empty_figure("Type a target expression to preview.")
+
     try:
-        body = expression_to_latex_body(expression)
+        latex = f"$$f(x, y) = {expression_to_latex_body(expression)}$$"
     except ValueError as exc:
-        return f"⚠️ {exc}"
-    except Exception as exc:  # noqa: BLE001 — sympy can raise lots of things
-        return f"⚠️ {exc.__class__.__name__}: {exc}"
-    return f"$$f(x, y) = {body}$$"
+        latex = f"⚠️ {exc}"
+    except Exception as exc:  # noqa: BLE001 — sympy can raise many shapes
+        latex = f"⚠️ {exc.__class__.__name__}: {exc}"
+
+    try:
+        xs, ys, zs = evaluate_on_grid(expression)
+        figure = target_surface_figure(xs, ys, zs)
+    except ValueError as exc:
+        figure = empty_figure(str(exc))
+    except Exception as exc:  # noqa: BLE001
+        figure = empty_figure(f"{exc.__class__.__name__}: {exc}")
+
+    return latex, figure
 
 
 @callback(

@@ -11,6 +11,7 @@ from __future__ import annotations
 import traceback
 from typing import Iterable
 
+import numpy as np
 import plotly.graph_objects as go
 from dash import html
 
@@ -54,6 +55,52 @@ def loss_figure(
         margin=dict(l=40, r=20, t=20, b=40),
         height=280,
         legend=dict(orientation="h", y=1.1, x=0),
+    )
+    return fig
+
+
+def target_surface_figure(xs: np.ndarray, ys: np.ndarray, zs: np.ndarray) -> go.Figure:
+    """Heatmap of f(x, y) over a 2-D grid — used by /coarse's live preview."""
+    fig = go.Figure(
+        data=go.Heatmap(
+            z=zs,
+            x=xs,
+            y=ys,
+            colorscale="Viridis",
+            zsmooth="best",
+            colorbar=dict(thickness=12, len=0.9, outlinewidth=0),
+            hovertemplate="x=%{x:.2f}<br>y=%{y:.2f}<br>f=%{z:.3g}<extra></extra>",
+        )
+    )
+    fig.update_layout(
+        margin=dict(l=40, r=10, t=10, b=40),
+        height=320,
+        xaxis_title="x",
+        yaxis=dict(title="y", scaleanchor="x"),
+        plot_bgcolor="white",
+    )
+    return fig
+
+
+def empty_figure(message: str) -> go.Figure:
+    """Plotly figure with no data, just a centered explanatory note."""
+    fig = go.Figure()
+    fig.update_layout(
+        height=320,
+        margin=dict(l=40, r=10, t=10, b=40),
+        xaxis=dict(visible=False),
+        yaxis=dict(visible=False),
+        annotations=[
+            dict(
+                text=message,
+                xref="paper",
+                yref="paper",
+                x=0.5,
+                y=0.5,
+                showarrow=False,
+                font=dict(color="#94a3b8", size=12),
+            )
+        ],
     )
     return fig
 
