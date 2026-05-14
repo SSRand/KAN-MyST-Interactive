@@ -41,11 +41,14 @@ container can see `pyproject.toml` and `uv.lock`. Inside the image,
 ├── app/              # Dash dashboard — one route per panel
 │   ├── app.py
 │   ├── kan_core.py
+│   ├── figures.py         # shared loss_figure + error_panel helpers
 │   ├── pages/
 │   │   ├── home.py        # /
 │   │   ├── coarse.py      # /coarse
 │   │   ├── refine.py      # /refine
-│   │   └── sparsify.py    # /sparsify
+│   │   ├── sparsify.py    # /sparsify
+│   │   ├── prune.py       # /prune
+│   │   └── symbolic.py    # /symbolic
 │   ├── Dockerfile
 │   └── README.md
 ├── start.sh

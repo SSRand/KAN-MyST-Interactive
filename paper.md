@@ -64,3 +64,31 @@ the penalty and renders the thinned diagram.
 :width: 100%
 :height: 760px
 :::
+
+## Pruning
+
+Sparsification makes weak edges *small*; pruning removes them *structurally*.
+`model.prune()` keeps only the edges whose magnitudes survive a threshold,
+returning a strictly smaller network. A short refit then recovers any
+accuracy lost during the removal.
+
+:::{iframe} http://localhost:8050/prune
+:label: panel-prune
+:width: 100%
+:height: 800px
+:::
+
+## Symbolic snap
+
+A pruned KAN often has so few edges left that each one looks like a simple
+1-D function. `model.auto_symbolic()` tries to identify the closest
+closed-form expression for each edge from a small library
+(`x`, `x²`, `sin`, `cos`, `exp`, …), and `model.symbolic_formula()` composes
+them into a single readable formula. The panel below runs the entire pipeline
+and prints the recovered formula above the diagram.
+
+:::{iframe} http://localhost:8050/symbolic
+:label: panel-symbolic
+:width: 100%
+:height: 860px
+:::

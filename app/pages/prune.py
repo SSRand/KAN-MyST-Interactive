@@ -1,9 +1,9 @@
-"""`/sparsify` panel — sparsification under L1 + entropy penalties.
+"""`/prune` panel — sparsify, prune low-magnitude edges, refit.
 
-A coarse `[2, 5, 1]` KAN is fit normally for a baseline, then training
-continues with `lamb` (overall regularisation weight) and `lamb_entropy`
-(entropy penalty). The combined pressure drives unused edges toward zero —
-the visible effect on `model.plot()` is a noticeably thinner diagram.
+The pipeline is coarse fit → fit under L1 + entropy → `model.prune()` →
+short refit on the surviving topology. The KAN diagram afterwards is a
+strictly smaller network than the original `[2, 5, 1]`; the loss curve has
+two dashed transitions (penalty on, prune).
 """
 
 from __future__ import annotations
@@ -15,20 +15,20 @@ import dash
 from dash import Input, Output, State, callback, dcc, html
 
 from figures import error_panel, loss_figure
-from kan_core import DEFAULT_EXPRESSION, train_sparsify
+from kan_core import DEFAULT_EXPRESSION, train_prune
 
-dash.register_page(__name__, path="/sparsify", title="Sparsification", name="Sparsification")
+dash.register_page(__name__, path="/prune", title="Pruning", name="Pruning")
 
 
 layout = html.Div(
     style={"maxWidth": "780px", "margin": "0 auto"},
     children=[
-        html.H2("Sparsification", style={"marginTop": 0}),
+        html.H2("Pruning", style={"marginTop": 0}),
         html.P(
             [
                 "Target: ",
                 html.Code(f"f(x, y) = {DEFAULT_EXPRESSION}"),
-                ". A coarse fit converges, then training continues with an L1 + entropy penalty so weak edges fade out.",
+                ". Sparsification thins the edges; pruning removes the weak ones structurally, then a short refit recovers any accuracy lost.",
             ]
         ),
         html.Div(
@@ -42,35 +42,44 @@ layout = html.Div(
             children=[
                 html.Label("λ (overall)"),
                 dcc.Slider(
-                    id="sparsify-lamb",
-                    min=0.0,
-                    max=0.01,
-                    step=0.0005,
-                    value=0.002,
+                    id="prune-lamb",
+                    min=0.001,
+                    max=0.02,
+                    step=0.001,
+                    value=0.005,
                     marks={
-                        0: "0",
-                        0.002: "0.002",
+                        0.001: "0.001",
                         0.005: "0.005",
                         0.01: "0.01",
+                        0.02: "0.02",
                     },
                 ),
                 html.Label("H (entropy)"),
                 dcc.Slider(
-                    id="sparsify-entropy",
+                    id="prune-entropy",
                     min=0.0,
                     max=3.0,
                     step=0.25,
-                    value=1.0,
+                    value=2.0,
                     marks={i: f"{i}" for i in (0, 1, 2, 3)},
                 ),
                 html.Label("Sparse steps"),
                 dcc.Slider(
-                    id="sparsify-steps",
-                    min=5,
+                    id="prune-sparse-steps",
+                    min=10,
                     max=40,
                     step=5,
-                    value=20,
-                    marks={i: str(i) for i in (5, 10, 20, 30, 40)},
+                    value=25,
+                    marks={i: str(i) for i in (10, 20, 30, 40)},
+                ),
+                html.Label("Refit steps"),
+                dcc.Slider(
+                    id="prune-refit-steps",
+                    min=5,
+                    max=30,
+                    step=5,
+                    value=15,
+                    marks={i: str(i) for i in (5, 10, 15, 20, 30)},
                 ),
             ],
         ),
@@ -79,7 +88,7 @@ layout = html.Div(
             children=[
                 html.Button(
                     "Train",
-                    id="sparsify-train",
+                    id="prune-train",
                     n_clicks=0,
                     style={
                         "padding": "0.5rem 1.4rem",
@@ -96,10 +105,10 @@ layout = html.Div(
         dcc.Loading(
             type="default",
             children=html.Div(
-                id="sparsify-output",
+                id="prune-output",
                 style={"marginTop": "1.2rem"},
                 children=html.P(
-                    "Click Train to fit a coarse KAN and then continue under the penalty.",
+                    "Click Train to run the full coarse → sparsify → prune → refit pipeline (~20-30 s).",
                     style={"color": "#666", "fontStyle": "italic"},
                 ),
             ),
@@ -109,25 +118,26 @@ layout = html.Div(
 
 
 @callback(
-    Output("sparsify-output", "children"),
-    Input("sparsify-train", "n_clicks"),
-    State("sparsify-lamb", "value"),
-    State("sparsify-entropy", "value"),
-    State("sparsify-steps", "value"),
+    Output("prune-output", "children"),
+    Input("prune-train", "n_clicks"),
+    State("prune-lamb", "value"),
+    State("prune-entropy", "value"),
+    State("prune-sparse-steps", "value"),
+    State("prune-refit-steps", "value"),
     prevent_initial_call=True,
 )
-def _on_train(_n: int, lamb: float, lamb_entropy: float, sparse_steps: int):
+def _on_train(_n: int, lamb: float, lamb_entropy: float, sparse_steps: int, refit_steps: int):
     print(
-        f"[sparsify] lamb={lamb} lamb_entropy={lamb_entropy} sparse_steps={sparse_steps}",
+        f"[prune] lamb={lamb} entropy={lamb_entropy} sparse_steps={sparse_steps} refit_steps={refit_steps}",
         file=sys.stderr,
         flush=True,
     )
     try:
-        result = train_sparsify(
-            coarse_steps=20,
+        result = train_prune(
             lamb=lamb,
             lamb_entropy=lamb_entropy,
             sparse_steps=sparse_steps,
+            prune_steps=refit_steps,
         )
     except Exception as exc:  # noqa: BLE001
         traceback.print_exc(file=sys.stderr)
@@ -140,17 +150,16 @@ def _on_train(_n: int, lamb: float, lamb_entropy: float, sparse_steps: int):
 
     return [
         html.Div(
-            style={"display": "flex", "gap": "1.5rem", "fontSize": "0.92rem", "color": "#222"},
+            style={"display": "flex", "gap": "1.5rem", "fontSize": "0.92rem", "color": "#222", "flexWrap": "wrap"},
             children=[
                 html.Span([html.Strong("final train loss: "), f"{final_train:.4g}"]),
                 html.Span([html.Strong("final test loss: "), f"{final_test:.4g}"]),
                 html.Span([html.Strong("λ: "), f"{lamb:.4g}"]),
-                html.Span([html.Strong("H: "), f"{lamb_entropy:g}"]),
             ],
         ),
         html.Img(
             src=result["graph_png_b64"],
-            alt="sparsified KAN diagram",
+            alt="pruned KAN diagram",
             style={
                 "width": "100%",
                 "marginTop": "1rem",
@@ -160,7 +169,12 @@ def _on_train(_n: int, lamb: float, lamb_entropy: float, sparse_steps: int):
         ),
         dcc.Graph(
             figure=loss_figure(
-                train_loss, test_loss, splits=[(result["split_at"], "penalty on →")]
+                train_loss,
+                test_loss,
+                splits=[
+                    (result["split_at_sparse"], "penalty →"),
+                    (result["split_at_prune"], "prune →"),
+                ],
             ),
             config={"displayModeBar": False},
             style={"marginTop": "0.5rem"},

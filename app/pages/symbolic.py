@@ -1,9 +1,9 @@
-"""`/sparsify` panel — sparsification under L1 + entropy penalties.
+"""`/symbolic` panel — auto-snap surviving edges to closed-form expressions.
 
-A coarse `[2, 5, 1]` KAN is fit normally for a baseline, then training
-continues with `lamb` (overall regularisation weight) and `lamb_entropy`
-(entropy penalty). The combined pressure drives unused edges toward zero —
-the visible effect on `model.plot()` is a noticeably thinner diagram.
+Runs the full pipeline (coarse → sparsify → prune → refit) and then asks
+pykan's `auto_symbolic` to identify the closest symbolic form for each
+surviving edge. The result is a closed-form approximation of the target
+function rendered as inline math.
 """
 
 from __future__ import annotations
@@ -15,20 +15,57 @@ import dash
 from dash import Input, Output, State, callback, dcc, html
 
 from figures import error_panel, loss_figure
-from kan_core import DEFAULT_EXPRESSION, train_sparsify
+from kan_core import DEFAULT_EXPRESSION, train_symbolic
 
-dash.register_page(__name__, path="/sparsify", title="Sparsification", name="Sparsification")
+dash.register_page(__name__, path="/symbolic", title="Symbolic snap", name="Symbolic snap")
+
+
+def _formula_block(formula: dict) -> html.Div:
+    """Render the discovered formula (LaTeX) or the error message."""
+    if formula.get("error"):
+        return html.Div(
+            [
+                html.Strong("symbolic fit failed: "),
+                html.Code(formula["error"]),
+            ],
+            style={"color": "#b45309", "padding": "0.5rem 0"},
+        )
+
+    latex = formula.get("latex") or "?"
+    return html.Div(
+        [
+            html.Div(
+                "Discovered symbolic approximation",
+                style={"fontWeight": 600, "marginBottom": "0.4rem", "color": "#0f172a"},
+            ),
+            dcc.Markdown(
+                f"$$f(x, y) \\approx {latex}$$",
+                mathjax=True,
+                style={"fontSize": "1.05rem"},
+            ),
+        ],
+        style={
+            "background": "#f8fafc",
+            "border": "1px solid #e2e8f0",
+            "padding": "0.9rem 1.1rem",
+            "borderRadius": "8px",
+            "marginTop": "1rem",
+        },
+    )
 
 
 layout = html.Div(
     style={"maxWidth": "780px", "margin": "0 auto"},
     children=[
-        html.H2("Sparsification", style={"marginTop": 0}),
+        html.H2("Symbolic snap", style={"marginTop": 0}),
         html.P(
             [
                 "Target: ",
                 html.Code(f"f(x, y) = {DEFAULT_EXPRESSION}"),
-                ". A coarse fit converges, then training continues with an L1 + entropy penalty so weak edges fade out.",
+                ". After pruning, pykan tries to match each surviving edge to a closed-form ",
+                "function from ",
+                html.Code("[x, x², x³, exp, log, sqrt, tanh, sin, cos, abs]"),
+                "; the recovered formula appears below.",
             ]
         ),
         html.Div(
@@ -42,35 +79,35 @@ layout = html.Div(
             children=[
                 html.Label("λ (overall)"),
                 dcc.Slider(
-                    id="sparsify-lamb",
-                    min=0.0,
-                    max=0.01,
-                    step=0.0005,
-                    value=0.002,
+                    id="symbolic-lamb",
+                    min=0.001,
+                    max=0.02,
+                    step=0.001,
+                    value=0.005,
                     marks={
-                        0: "0",
-                        0.002: "0.002",
+                        0.001: "0.001",
                         0.005: "0.005",
                         0.01: "0.01",
+                        0.02: "0.02",
                     },
                 ),
                 html.Label("H (entropy)"),
                 dcc.Slider(
-                    id="sparsify-entropy",
+                    id="symbolic-entropy",
                     min=0.0,
                     max=3.0,
                     step=0.25,
-                    value=1.0,
+                    value=2.0,
                     marks={i: f"{i}" for i in (0, 1, 2, 3)},
                 ),
                 html.Label("Sparse steps"),
                 dcc.Slider(
-                    id="sparsify-steps",
-                    min=5,
-                    max=40,
+                    id="symbolic-sparse-steps",
+                    min=10,
+                    max=50,
                     step=5,
-                    value=20,
-                    marks={i: str(i) for i in (5, 10, 20, 30, 40)},
+                    value=30,
+                    marks={i: str(i) for i in (10, 20, 30, 40, 50)},
                 ),
             ],
         ),
@@ -79,7 +116,7 @@ layout = html.Div(
             children=[
                 html.Button(
                     "Train",
-                    id="sparsify-train",
+                    id="symbolic-train",
                     n_clicks=0,
                     style={
                         "padding": "0.5rem 1.4rem",
@@ -96,10 +133,10 @@ layout = html.Div(
         dcc.Loading(
             type="default",
             children=html.Div(
-                id="sparsify-output",
+                id="symbolic-output",
                 style={"marginTop": "1.2rem"},
                 children=html.P(
-                    "Click Train to fit a coarse KAN and then continue under the penalty.",
+                    "Click Train to run the full pipeline and attempt symbolic snapping (~30-60 s).",
                     style={"color": "#666", "fontStyle": "italic"},
                 ),
             ),
@@ -109,22 +146,21 @@ layout = html.Div(
 
 
 @callback(
-    Output("sparsify-output", "children"),
-    Input("sparsify-train", "n_clicks"),
-    State("sparsify-lamb", "value"),
-    State("sparsify-entropy", "value"),
-    State("sparsify-steps", "value"),
+    Output("symbolic-output", "children"),
+    Input("symbolic-train", "n_clicks"),
+    State("symbolic-lamb", "value"),
+    State("symbolic-entropy", "value"),
+    State("symbolic-sparse-steps", "value"),
     prevent_initial_call=True,
 )
 def _on_train(_n: int, lamb: float, lamb_entropy: float, sparse_steps: int):
     print(
-        f"[sparsify] lamb={lamb} lamb_entropy={lamb_entropy} sparse_steps={sparse_steps}",
+        f"[symbolic] lamb={lamb} entropy={lamb_entropy} sparse_steps={sparse_steps}",
         file=sys.stderr,
         flush=True,
     )
     try:
-        result = train_sparsify(
-            coarse_steps=20,
+        result = train_symbolic(
             lamb=lamb,
             lamb_entropy=lamb_entropy,
             sparse_steps=sparse_steps,
@@ -139,18 +175,18 @@ def _on_train(_n: int, lamb: float, lamb_entropy: float, sparse_steps: int):
     final_test = test_loss[-1] if test_loss else float("nan")
 
     return [
+        _formula_block(result["formula"]),
         html.Div(
-            style={"display": "flex", "gap": "1.5rem", "fontSize": "0.92rem", "color": "#222"},
+            style={"display": "flex", "gap": "1.5rem", "fontSize": "0.92rem", "color": "#222", "marginTop": "1rem", "flexWrap": "wrap"},
             children=[
                 html.Span([html.Strong("final train loss: "), f"{final_train:.4g}"]),
                 html.Span([html.Strong("final test loss: "), f"{final_test:.4g}"]),
                 html.Span([html.Strong("λ: "), f"{lamb:.4g}"]),
-                html.Span([html.Strong("H: "), f"{lamb_entropy:g}"]),
             ],
         ),
         html.Img(
             src=result["graph_png_b64"],
-            alt="sparsified KAN diagram",
+            alt="symbolic-snapped KAN diagram",
             style={
                 "width": "100%",
                 "marginTop": "1rem",
@@ -160,7 +196,12 @@ def _on_train(_n: int, lamb: float, lamb_entropy: float, sparse_steps: int):
         ),
         dcc.Graph(
             figure=loss_figure(
-                train_loss, test_loss, splits=[(result["split_at"], "penalty on →")]
+                train_loss,
+                test_loss,
+                splits=[
+                    (result["split_at_sparse"], "penalty →"),
+                    (result["split_at_prune"], "prune →"),
+                ],
             ),
             config={"displayModeBar": False},
             style={"marginTop": "0.5rem"},

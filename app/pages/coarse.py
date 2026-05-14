@@ -14,29 +14,12 @@ import sys
 import traceback
 
 import dash
-import plotly.graph_objects as go
 from dash import Input, Output, State, callback, dcc, html
 
+from figures import error_panel, loss_figure
 from kan_core import DEFAULT_EXPRESSION, train_coarse
 
 dash.register_page(__name__, path="/coarse", title="Coarse KAN fit", name="Coarse fit")
-
-
-def _loss_figure(train: list[float], test: list[float]) -> go.Figure:
-    fig = go.Figure()
-    if train:
-        fig.add_trace(go.Scatter(y=train, name="train", mode="lines+markers"))
-    if test:
-        fig.add_trace(go.Scatter(y=test, name="test", mode="lines+markers"))
-    fig.update_layout(
-        xaxis_title="step",
-        yaxis_title="loss",
-        yaxis_type="log",
-        margin=dict(l=40, r=20, t=20, b=40),
-        height=280,
-        legend=dict(orientation="h", y=1.1, x=0),
-    )
-    return fig
 
 
 layout = html.Div(
@@ -118,21 +101,10 @@ def _on_train(_n_clicks: int, grid: int, steps: int):
     print(f"[coarse] grid={grid} steps={steps}", file=sys.stderr, flush=True)
     try:
         result = train_coarse(grid=grid, steps=steps)
-    except Exception as exc:  # noqa: BLE001 — we want every error visible
+    except Exception as exc:  # noqa: BLE001
         traceback.print_exc(file=sys.stderr)
-        return html.Pre(
-            f"{exc.__class__.__name__}: {exc}\n\n{traceback.format_exc()}",
-            style={
-                "color": "#b91c1c",
-                "background": "#fef2f2",
-                "padding": "1rem",
-                "borderRadius": "6px",
-                "border": "1px solid #fecaca",
-                "fontSize": "0.78rem",
-                "overflow": "auto",
-                "whiteSpace": "pre-wrap",
-            },
-        )
+        return error_panel(exc)
+
     train_loss = result["train_loss"]
     test_loss = result["test_loss"]
     final_train = train_loss[-1] if train_loss else float("nan")
@@ -154,7 +126,7 @@ def _on_train(_n_clicks: int, grid: int, steps: int):
             style={"width": "100%", "marginTop": "1rem", "border": "1px solid #e5e7eb", "borderRadius": "8px"},
         ),
         dcc.Graph(
-            figure=_loss_figure(train_loss, test_loss),
+            figure=loss_figure(train_loss, test_loss),
             config={"displayModeBar": False},
             style={"marginTop": "0.5rem"},
         ),

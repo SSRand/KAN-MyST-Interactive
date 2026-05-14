@@ -18,6 +18,8 @@ layout = html.Div(
                 html.Li(dcc.Link("/coarse — coarse KAN fit", href="/coarse")),
                 html.Li(dcc.Link("/refine — grid refinement", href="/refine")),
                 html.Li(dcc.Link("/sparsify — sparsification (L1 + entropy)", href="/sparsify")),
+                html.Li(dcc.Link("/prune — sparsify + prune", href="/prune")),
+                html.Li(dcc.Link("/symbolic — full pipeline + symbolic snap", href="/symbolic")),
             ]
         ),
     ],
