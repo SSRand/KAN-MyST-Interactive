@@ -16,7 +16,7 @@ import traceback
 import dash
 from dash import Input, Output, State, callback, dcc, html
 
-from figures import error_panel, loss_figure
+from figures import error_panel, loss_figure, target_input
 from kan_core import DEFAULT_EXPRESSION, train_coarse
 
 dash.register_page(__name__, path="/coarse", title="Coarse KAN fit", name="Coarse fit")
@@ -27,15 +27,17 @@ layout = html.Div(
     children=[
         html.H2("Coarse KAN fit", style={"marginTop": 0}),
         html.P(
-            [
-                "Target: ",
-                html.Code(f"f(x, y) = {DEFAULT_EXPRESSION}"),
-                ". The slider sets the spline grid resolution; the step slider sets the LBFGS iteration budget.",
-            ],
+            "Edit the target function and click Train. Allowed names: ",
+            style={"marginBottom": "0.2rem"},
+        ),
+        html.P(
+            html.Code("sin, cos, tan, tanh, exp, log, sqrt, abs, x, y, pi, e"),
+            style={"color": "#475569", "fontSize": "0.85rem", "marginTop": 0},
         ),
         html.Div(
-            style={"display": "grid", "gridTemplateColumns": "120px 1fr", "rowGap": "0.6rem", "columnGap": "1rem", "alignItems": "center"},
+            style={"display": "grid", "gridTemplateColumns": "150px 1fr", "rowGap": "0.6rem", "columnGap": "1rem", "alignItems": "center"},
             children=[
+                *target_input("coarse-expr", DEFAULT_EXPRESSION),
                 html.Label("Grid"),
                 dcc.Slider(
                     id="coarse-grid",
@@ -93,14 +95,15 @@ layout = html.Div(
 @callback(
     Output("coarse-output", "children"),
     Input("coarse-train", "n_clicks"),
+    State("coarse-expr", "value"),
     State("coarse-grid", "value"),
     State("coarse-steps", "value"),
     prevent_initial_call=True,
 )
-def _on_train(_n_clicks: int, grid: int, steps: int):
-    print(f"[coarse] grid={grid} steps={steps}", file=sys.stderr, flush=True)
+def _on_train(_n_clicks: int, expression: str, grid: int, steps: int):
+    print(f"[coarse] expr={expression!r} grid={grid} steps={steps}", file=sys.stderr, flush=True)
     try:
-        result = train_coarse(grid=grid, steps=steps)
+        result = train_coarse(expression=expression, grid=grid, steps=steps)
     except Exception as exc:  # noqa: BLE001
         traceback.print_exc(file=sys.stderr)
         return error_panel(exc)

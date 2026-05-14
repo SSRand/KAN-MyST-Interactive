@@ -13,7 +13,7 @@ import traceback
 import dash
 from dash import Input, Output, State, callback, dcc, html
 
-from figures import error_panel, loss_figure
+from figures import error_panel, loss_figure, target_input
 from kan_core import DEFAULT_EXPRESSION, train_refine
 
 dash.register_page(__name__, path="/refine", title="Grid refinement", name="Grid refinement")
@@ -24,21 +24,23 @@ layout = html.Div(
     children=[
         html.H2("Grid refinement", style={"marginTop": 0}),
         html.P(
-            [
-                "Target: ",
-                html.Code(f"f(x, y) = {DEFAULT_EXPRESSION}"),
-                ". The panel first trains a coarse KAN, then refines its spline grid and continues.",
-            ]
+            "Trains a coarse KAN on the target, then refines its spline grid and continues. Allowed names: ",
+            style={"marginBottom": "0.2rem"},
+        ),
+        html.P(
+            html.Code("sin, cos, tan, tanh, exp, log, sqrt, abs, x, y, pi, e"),
+            style={"color": "#475569", "fontSize": "0.85rem", "marginTop": 0},
         ),
         html.Div(
             style={
                 "display": "grid",
-                "gridTemplateColumns": "140px 1fr",
+                "gridTemplateColumns": "150px 1fr",
                 "rowGap": "0.6rem",
                 "columnGap": "1rem",
                 "alignItems": "center",
             },
             children=[
+                *target_input("refine-expr", DEFAULT_EXPRESSION),
                 html.Label("Coarse grid"),
                 dcc.Slider(
                     id="refine-coarse-grid",
@@ -105,14 +107,15 @@ layout = html.Div(
 @callback(
     Output("refine-output", "children"),
     Input("refine-train", "n_clicks"),
+    State("refine-expr", "value"),
     State("refine-coarse-grid", "value"),
     State("refine-refined-grid", "value"),
     State("refine-steps", "value"),
     prevent_initial_call=True,
 )
-def _on_train(_n: int, coarse_grid: int, refined_grid: int, steps: int):
+def _on_train(_n: int, expression: str, coarse_grid: int, refined_grid: int, steps: int):
     print(
-        f"[refine] coarse_grid={coarse_grid} refined_grid={refined_grid} steps={steps}",
+        f"[refine] expr={expression!r} coarse_grid={coarse_grid} refined_grid={refined_grid} steps={steps}",
         file=sys.stderr,
         flush=True,
     )
@@ -124,6 +127,7 @@ def _on_train(_n: int, coarse_grid: int, refined_grid: int, steps: int):
 
     try:
         result = train_refine(
+            expression=expression,
             coarse_grid=coarse_grid,
             coarse_steps=steps,
             refined_grid=refined_grid,

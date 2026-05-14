@@ -7,13 +7,12 @@ loss arrays + a base64-encoded KAN diagram PNG.
 
 from __future__ import annotations
 
+import ast
 import base64
 import io
-import math
 import os
 import tempfile
-from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 os.environ.setdefault("MPLBACKEND", "Agg")
 os.environ.setdefault("OMP_NUM_THREADS", "1")
@@ -21,15 +20,95 @@ os.environ.setdefault("MKL_NUM_THREADS", "1")
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 
 import matplotlib.pyplot as plt  # noqa: E402
+import numpy as np  # noqa: E402
 import torch  # noqa: E402
 from kan import KAN, create_dataset  # noqa: E402
 
 
 DEFAULT_EXPRESSION = "exp(sin(pi*x) + y**2)"
 
+# Allowed identifiers, functions, and AST node types for user-supplied target
+# expressions. Anything outside the allowlist (`__import__`, attribute access,
+# comprehensions, …) is rejected before the expression is ever evaluated.
+SAFE_FUNCTIONS = {
+    "sin": torch.sin,
+    "cos": torch.cos,
+    "tan": torch.tan,
+    "tanh": torch.tanh,
+    "exp": torch.exp,
+    "log": torch.log,
+    "sqrt": torch.sqrt,
+    "abs": torch.abs,
+}
+SAFE_NAMES = set(SAFE_FUNCTIONS) | {"x", "y", "pi", "e"}
+SAFE_NODES = (
+    ast.Expression,
+    ast.BinOp,
+    ast.UnaryOp,
+    ast.Call,
+    ast.Name,
+    ast.Load,
+    ast.Constant,
+    ast.Add,
+    ast.Sub,
+    ast.Mult,
+    ast.Div,
+    ast.Pow,
+    ast.USub,
+    ast.UAdd,
+)
 
-def _default_target(x: torch.Tensor) -> torch.Tensor:
-    return torch.exp(torch.sin(math.pi * x[:, [0]]) + x[:, [1]] ** 2)
+
+def validate_expression(expression: str) -> str:
+    """Parse and statically validate a user target expression.
+
+    Returns the normalised form (caret → double-asterisk). Raises ValueError
+    if any token, name, or AST node falls outside the allowlist.
+    """
+    normalised = expression.strip().replace("^", "**")
+    if not normalised:
+        raise ValueError("Target expression is empty.")
+    tree = ast.parse(normalised, mode="eval")
+    for node in ast.walk(tree):
+        if not isinstance(node, SAFE_NODES):
+            raise ValueError(f"Unsupported expression element: {node.__class__.__name__}")
+        if isinstance(node, ast.Name) and node.id not in SAFE_NAMES:
+            raise ValueError(f"Unsupported name: {node.id}")
+        if isinstance(node, ast.Call) and not isinstance(node.func, ast.Name):
+            raise ValueError("Only simple function calls like sin(x) are supported.")
+        if isinstance(node, ast.Call) and node.func.id not in SAFE_FUNCTIONS:
+            raise ValueError(f"Unsupported function: {node.func.id}")
+    return normalised
+
+
+def make_target(expression: str) -> Callable[[torch.Tensor], torch.Tensor]:
+    """Compile a validated expression to a torch-friendly target function."""
+    normalised = validate_expression(expression)
+    code = compile(ast.parse(normalised, mode="eval"), "<kan-expression>", "eval")
+
+    def target_fn(inputs: torch.Tensor) -> torch.Tensor:
+        env = {
+            **SAFE_FUNCTIONS,
+            "x": inputs[:, [0]],
+            "y": inputs[:, [1]],
+            "pi": torch.tensor(np.pi, dtype=inputs.dtype, device=inputs.device),
+            "e": torch.tensor(np.e, dtype=inputs.dtype, device=inputs.device),
+        }
+        result = eval(code, {"__builtins__": {}}, env)  # noqa: S307 — env is locked down
+        if not torch.is_tensor(result):
+            result = torch.as_tensor(result, dtype=inputs.dtype, device=inputs.device)
+        if result.ndim == 0:
+            result = result.expand(inputs.shape[0], 1)
+        if result.ndim == 1:
+            result = result[:, None]
+        if result.shape != (inputs.shape[0], 1):
+            raise ValueError("Expression must evaluate to one scalar value per (x, y) point.")
+        if not torch.isfinite(result).all():
+            raise ValueError("Expression produced non-finite values on the training grid.")
+        return result
+
+    target_fn.expression = normalised  # type: ignore[attr-defined]
+    return target_fn
 
 
 def _setup() -> None:
@@ -38,9 +117,9 @@ def _setup() -> None:
     torch.manual_seed(0)
 
 
-def _dataset() -> dict[str, torch.Tensor]:
+def _dataset(target_fn: Callable[[torch.Tensor], torch.Tensor]) -> dict[str, torch.Tensor]:
     return create_dataset(
-        _default_target,
+        target_fn,
         n_var=2,
         train_num=300,
         test_num=300,
@@ -90,10 +169,15 @@ def _losses(history: dict) -> tuple[list[float], list[float]]:
     return train, test
 
 
-def train_coarse(grid: int = 5, steps: int = 20) -> dict[str, Any]:
-    """One [2, 5, 1] KAN fit on the default target."""
+def train_coarse(
+    expression: str = DEFAULT_EXPRESSION,
+    grid: int = 5,
+    steps: int = 20,
+) -> dict[str, Any]:
+    """One [2, 5, 1] KAN fit on the given target expression."""
     _setup()
-    dataset = _dataset()
+    target = make_target(expression)
+    dataset = _dataset(target)
     with tempfile.TemporaryDirectory(prefix="kan-ckpt-") as ckpt_dir:
         model = _new_kan(grid, ckpt_path=ckpt_dir)
         history = model.fit(dataset, opt="LBFGS", steps=int(steps), log=10**9)
@@ -108,6 +192,7 @@ def train_coarse(grid: int = 5, steps: int = 20) -> dict[str, Any]:
 
 
 def train_sparsify(
+    expression: str = DEFAULT_EXPRESSION,
     coarse_steps: int = 20,
     lamb: float = 0.002,
     lamb_entropy: float = 1.0,
@@ -121,7 +206,8 @@ def train_sparsify(
     the diagram.
     """
     _setup()
-    dataset = _dataset()
+    target = make_target(expression)
+    dataset = _dataset(target)
     with tempfile.TemporaryDirectory(prefix="kan-ckpt-") as ckpt_dir:
         model = _new_kan(grid=5, ckpt_path=ckpt_dir)
         coarse_history = model.fit(
@@ -152,6 +238,7 @@ def train_sparsify(
 
 
 def train_refine(
+    expression: str = DEFAULT_EXPRESSION,
     coarse_grid: int = 5,
     coarse_steps: int = 20,
     refined_grid: int = 10,
@@ -159,7 +246,8 @@ def train_refine(
 ) -> dict[str, Any]:
     """Coarse fit, then `model.refine()` to a finer spline grid, then continued training."""
     _setup()
-    dataset = _dataset()
+    target = make_target(expression)
+    dataset = _dataset(target)
 
     with tempfile.TemporaryDirectory(prefix="kan-ckpt-") as ckpt_dir:
         model = _new_kan(coarse_grid, ckpt_path=ckpt_dir)
@@ -200,6 +288,7 @@ def _try_prune(model: KAN, ckpt_dir: str) -> KAN:
 
 
 def train_prune(
+    expression: str = DEFAULT_EXPRESSION,
     lamb: float = 0.005,
     lamb_entropy: float = 2.0,
     sparse_steps: int = 25,
@@ -211,7 +300,8 @@ def train_prune(
     default so there's something for `prune()` to actually remove.
     """
     _setup()
-    dataset = _dataset()
+    target = make_target(expression)
+    dataset = _dataset(target)
     with tempfile.TemporaryDirectory(prefix="kan-ckpt-") as ckpt_dir:
         model = _new_kan(grid=5, ckpt_path=ckpt_dir)
 
@@ -275,6 +365,7 @@ def _symbolic_formula(model: KAN) -> dict[str, str | None]:
 
 
 def train_symbolic(
+    expression: str = DEFAULT_EXPRESSION,
     lamb: float = 0.005,
     lamb_entropy: float = 2.0,
     sparse_steps: int = 30,
@@ -285,7 +376,8 @@ def train_symbolic(
     either a LaTeX string or an error explanation.
     """
     _setup()
-    dataset = _dataset()
+    target = make_target(expression)
+    dataset = _dataset(target)
     with tempfile.TemporaryDirectory(prefix="kan-ckpt-") as ckpt_dir:
         model = _new_kan(grid=5, ckpt_path=ckpt_dir)
 

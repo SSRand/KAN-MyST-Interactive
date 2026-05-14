@@ -12,7 +12,34 @@ import traceback
 from typing import Iterable
 
 import plotly.graph_objects as go
-from dash import html
+from dash import dcc, html
+
+
+def target_input(input_id: str, default: str) -> list:
+    """A label + monospace text input pair for the panel grids.
+
+    Returns a two-element list ready to splat into a grid layout's `children`.
+    Use as `*target_input("coarse-expr", DEFAULT_EXPRESSION),`.
+    """
+    return [
+        html.Label("Target  f(x, y)"),
+        dcc.Input(
+            id=input_id,
+            type="text",
+            value=default,
+            placeholder="exp(sin(pi*x) + y**2)",
+            debounce=True,
+            style={
+                "width": "100%",
+                "padding": "0.4rem 0.6rem",
+                "fontFamily": "ui-monospace, SFMono-Regular, Menlo, monospace",
+                "fontSize": "0.9rem",
+                "borderRadius": "4px",
+                "border": "1px solid #cbd5e1",
+                "boxSizing": "border-box",
+            },
+        ),
+    ]
 
 
 def loss_figure(

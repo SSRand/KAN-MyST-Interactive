@@ -14,7 +14,7 @@ import traceback
 import dash
 from dash import Input, Output, State, callback, dcc, html
 
-from figures import error_panel, loss_figure
+from figures import error_panel, loss_figure, target_input
 from kan_core import DEFAULT_EXPRESSION, train_sparsify
 
 dash.register_page(__name__, path="/sparsify", title="Sparsification", name="Sparsification")
@@ -25,11 +25,12 @@ layout = html.Div(
     children=[
         html.H2("Sparsification", style={"marginTop": 0}),
         html.P(
-            [
-                "Target: ",
-                html.Code(f"f(x, y) = {DEFAULT_EXPRESSION}"),
-                ". A coarse fit converges, then training continues with an L1 + entropy penalty so weak edges fade out.",
-            ]
+            "A coarse fit converges, then training continues with an L1 + entropy penalty so weak edges fade out. Allowed names: ",
+            style={"marginBottom": "0.2rem"},
+        ),
+        html.P(
+            html.Code("sin, cos, tan, tanh, exp, log, sqrt, abs, x, y, pi, e"),
+            style={"color": "#475569", "fontSize": "0.85rem", "marginTop": 0},
         ),
         html.Div(
             style={
@@ -40,6 +41,7 @@ layout = html.Div(
                 "alignItems": "center",
             },
             children=[
+                *target_input("sparsify-expr", DEFAULT_EXPRESSION),
                 html.Label("λ (overall)"),
                 dcc.Slider(
                     id="sparsify-lamb",
@@ -111,19 +113,21 @@ layout = html.Div(
 @callback(
     Output("sparsify-output", "children"),
     Input("sparsify-train", "n_clicks"),
+    State("sparsify-expr", "value"),
     State("sparsify-lamb", "value"),
     State("sparsify-entropy", "value"),
     State("sparsify-steps", "value"),
     prevent_initial_call=True,
 )
-def _on_train(_n: int, lamb: float, lamb_entropy: float, sparse_steps: int):
+def _on_train(_n: int, expression: str, lamb: float, lamb_entropy: float, sparse_steps: int):
     print(
-        f"[sparsify] lamb={lamb} lamb_entropy={lamb_entropy} sparse_steps={sparse_steps}",
+        f"[sparsify] expr={expression!r} lamb={lamb} lamb_entropy={lamb_entropy} sparse_steps={sparse_steps}",
         file=sys.stderr,
         flush=True,
     )
     try:
         result = train_sparsify(
+            expression=expression,
             coarse_steps=20,
             lamb=lamb,
             lamb_entropy=lamb_entropy,

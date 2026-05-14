@@ -14,7 +14,7 @@ import traceback
 import dash
 from dash import Input, Output, State, callback, dcc, html
 
-from figures import error_panel, loss_figure
+from figures import error_panel, loss_figure, target_input
 from kan_core import DEFAULT_EXPRESSION, train_symbolic
 
 dash.register_page(__name__, path="/symbolic", title="Symbolic snap", name="Symbolic snap")
@@ -60,13 +60,18 @@ layout = html.Div(
         html.H2("Symbolic snap", style={"marginTop": 0}),
         html.P(
             [
-                "Target: ",
-                html.Code(f"f(x, y) = {DEFAULT_EXPRESSION}"),
-                ". After pruning, pykan tries to match each surviving edge to a closed-form ",
-                "function from ",
+                "After pruning, pykan tries to match each surviving edge to a closed-form function from ",
                 html.Code("[x, x², x³, exp, log, sqrt, tanh, sin, cos, abs]"),
                 "; the recovered formula appears below.",
-            ]
+            ],
+            style={"marginBottom": "0.2rem"},
+        ),
+        html.P(
+            [
+                "Allowed names in the target expression: ",
+                html.Code("sin, cos, tan, tanh, exp, log, sqrt, abs, x, y, pi, e"),
+            ],
+            style={"color": "#475569", "fontSize": "0.85rem", "marginTop": 0},
         ),
         html.Div(
             style={
@@ -77,6 +82,7 @@ layout = html.Div(
                 "alignItems": "center",
             },
             children=[
+                *target_input("symbolic-expr", DEFAULT_EXPRESSION),
                 html.Label("λ (overall)"),
                 dcc.Slider(
                     id="symbolic-lamb",
@@ -148,19 +154,21 @@ layout = html.Div(
 @callback(
     Output("symbolic-output", "children"),
     Input("symbolic-train", "n_clicks"),
+    State("symbolic-expr", "value"),
     State("symbolic-lamb", "value"),
     State("symbolic-entropy", "value"),
     State("symbolic-sparse-steps", "value"),
     prevent_initial_call=True,
 )
-def _on_train(_n: int, lamb: float, lamb_entropy: float, sparse_steps: int):
+def _on_train(_n: int, expression: str, lamb: float, lamb_entropy: float, sparse_steps: int):
     print(
-        f"[symbolic] lamb={lamb} entropy={lamb_entropy} sparse_steps={sparse_steps}",
+        f"[symbolic] expr={expression!r} lamb={lamb} entropy={lamb_entropy} sparse_steps={sparse_steps}",
         file=sys.stderr,
         flush=True,
     )
     try:
         result = train_symbolic(
+            expression=expression,
             lamb=lamb,
             lamb_entropy=lamb_entropy,
             sparse_steps=sparse_steps,

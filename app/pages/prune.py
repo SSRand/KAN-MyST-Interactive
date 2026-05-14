@@ -14,7 +14,7 @@ import traceback
 import dash
 from dash import Input, Output, State, callback, dcc, html
 
-from figures import error_panel, loss_figure
+from figures import error_panel, loss_figure, target_input
 from kan_core import DEFAULT_EXPRESSION, train_prune
 
 dash.register_page(__name__, path="/prune", title="Pruning", name="Pruning")
@@ -25,11 +25,12 @@ layout = html.Div(
     children=[
         html.H2("Pruning", style={"marginTop": 0}),
         html.P(
-            [
-                "Target: ",
-                html.Code(f"f(x, y) = {DEFAULT_EXPRESSION}"),
-                ". Sparsification thins the edges; pruning removes the weak ones structurally, then a short refit recovers any accuracy lost.",
-            ]
+            "Sparsification thins the edges; pruning removes the weak ones structurally, then a short refit recovers any accuracy lost. Allowed names: ",
+            style={"marginBottom": "0.2rem"},
+        ),
+        html.P(
+            html.Code("sin, cos, tan, tanh, exp, log, sqrt, abs, x, y, pi, e"),
+            style={"color": "#475569", "fontSize": "0.85rem", "marginTop": 0},
         ),
         html.Div(
             style={
@@ -40,6 +41,7 @@ layout = html.Div(
                 "alignItems": "center",
             },
             children=[
+                *target_input("prune-expr", DEFAULT_EXPRESSION),
                 html.Label("λ (overall)"),
                 dcc.Slider(
                     id="prune-lamb",
@@ -120,20 +122,22 @@ layout = html.Div(
 @callback(
     Output("prune-output", "children"),
     Input("prune-train", "n_clicks"),
+    State("prune-expr", "value"),
     State("prune-lamb", "value"),
     State("prune-entropy", "value"),
     State("prune-sparse-steps", "value"),
     State("prune-refit-steps", "value"),
     prevent_initial_call=True,
 )
-def _on_train(_n: int, lamb: float, lamb_entropy: float, sparse_steps: int, refit_steps: int):
+def _on_train(_n: int, expression: str, lamb: float, lamb_entropy: float, sparse_steps: int, refit_steps: int):
     print(
-        f"[prune] lamb={lamb} entropy={lamb_entropy} sparse_steps={sparse_steps} refit_steps={refit_steps}",
+        f"[prune] expr={expression!r} lamb={lamb} entropy={lamb_entropy} sparse_steps={sparse_steps} refit_steps={refit_steps}",
         file=sys.stderr,
         flush=True,
     )
     try:
         result = train_prune(
+            expression=expression,
             lamb=lamb,
             lamb_entropy=lamb_entropy,
             sparse_steps=sparse_steps,
