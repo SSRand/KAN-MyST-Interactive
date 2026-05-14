@@ -1,89 +1,104 @@
 # KAN-MyST-Interactive
 
-An interactive Kolmogorov–Arnold Network paper rendered as a MyST article with
-Evidence's `article-theme`, executed against a **local** Jupyter kernel. The
-page presents itself as an Evidence preprint and uses Thebe-style "Run" buttons
-on every code cell — but the compute runs on your own machine, so the loop is
-fast and does not depend on Evidence's Binder ever booting.
+Interactive Kolmogorov–Arnold Network paper, structured for the Evidence
+publishing platform. Two pieces:
 
-> Upstream of `kan-fulltext-demo/`: this is the MyST-native rewrite Evidence
-> asked for. Compute stays local; the MyST + Thebe surface is the part Evidence
-> recognises as theirs.
+1. **A MyST article** (`paper.md`, rendered with the Evidence `article-theme`)
+   that carries the prose, equations, citations, and figures.
+2. **A Plotly Dash dashboard** (`app/`) that exposes each interactive panel
+   at its own URL. The article embeds each URL with an `:::{iframe}` directive
+   next to the relevant section.
 
-Maintained at: https://github.com/SSRand/KAN-MyST-Interactive
+This split is the architecture Agah asked for in the 2026-04-30 meeting:
+URL-resolved modular panels, containerised so Evidence can deploy them, and
+interleaved with prose via iframe. See
+[`docs/direction-2026-04-30.md`](docs/direction-2026-04-30.md) for the
+rationale and the v0/v1 boundary.
 
-## Why local execution
+Repo: https://github.com/SSRand/KAN-MyST-Interactive
 
-The Evidence Binder (`terrarium.evidencepub.io`) cannot currently build
-arbitrary repositories on demand, and even when it does, pykan + torch + numerics
-yields a ~10 minute cold start. For a demo whose value is interactive
-iteration on the training, that is a non-starter. So:
+## v0 scope
 
-- **Frontend (Evidence's part)**: MyST article-theme, citation rendering,
-  cross-references, Thebe "Run" UI, downloadable notebook.
-- **Backend (your part)**: a Jupyter server on `localhost:8888`, started by
-  `./start.sh`. MyST's Thebe config points at it directly.
+Only one panel is implemented (`/coarse` — coarse KAN fit on a fixed target).
+The architecture works end to end: visiting the article triggers the iframe,
+the iframe loads the Dash route, the route trains a KAN on demand and returns
+the diagram and loss curve. Subsequent panels (`/refine`, `/sparsify`, `/prune`,
+`/symbolic`) and a target-function picker are v1 work.
 
-## Quick start
+## Quick start (local dev)
 
 ```bash
 git clone https://github.com/SSRand/KAN-MyST-Interactive.git
 cd KAN-MyST-Interactive
 
-# one-time setup
-UV_CACHE_DIR=/tmp/uv-cache uv sync         # installs pykan + torch + jupyter
-npm install -g mystmd                       # if not already on PATH
+# one-time tooling
+#   uv:  https://docs.astral.sh/uv/getting-started/installation/
+#   mystmd:
+npm install -g mystmd
 
-# boot Jupyter + MyST together
+# boot both: Dash on 8050, MyST on 3000
 ./start.sh
 ```
 
-Open `http://localhost:3000` and click "Run" on any `{code-cell}` block — the
-first click takes ~2 s to attach to the local kernel, subsequent runs are
-instant.
+`start.sh` calls `uv run` for the Dash side — uv creates `.venv/` and installs
+everything from `pyproject.toml` + `uv.lock` on first call, reuses it
+afterwards. No separate `pip install` step.
+
+Open `http://localhost:3000` for the article. The iframe in the "A baseline
+training run" section loads `http://localhost:8050/coarse` directly.
 
 ## Layout
 
 ```
-kan-myst-demo/                       # folder; GitHub repo is KAN-MyST-Interactive
-├── myst.yml                         # MyST project + thebe.server → localhost
-├── paper.md                         # the article (narrative + inline code cells)
-├── paper.bib                        # bibliography
-├── pyproject.toml                   # uv-managed Python deps (pykan, torch, jupyter)
-├── start.sh                         # boots Jupyter on 8888 + MyST on 3000
+KAN-MyST-Interactive/
+├── paper.md              # the article (prose, equations, iframe directives)
+├── paper.bib             # bibliography
+├── myst.yml              # MyST project config (theme, bibliography, abbreviations)
+├── pyproject.toml        # uv-managed Python deps (Dash + pykan + torch)
+├── uv.lock               # pinned dependency resolution; committed
+├── start.sh              # boots app/ + MyST together for dev
 ├── content/
-│   └── kan_demo.ipynb               # labelled cells (#kan-fit, #kan-loss)
-└── README.md
+│   └── kan_demo.ipynb    # supporting notebook (not embedded in the article)
+├── app/                  # the Dash dashboard
+│   ├── app.py            # multi-page entry point
+│   ├── kan_core.py       # train_coarse(grid, steps)
+│   ├── pages/
+│   │   ├── home.py       # /
+│   │   └── coarse.py     # /coarse
+│   ├── Dockerfile        # build context = repo root (sees pyproject + uv.lock)
+│   └── README.md
+└── docs/
+    ├── direction-2026-04-30.md      # why this architecture
+    └── ../../meetings/2026-04-30.md # raw meeting notes (workspace-level)
 ```
 
-## How the wiring works
+## Production deployment
 
-| Surface | Mechanism |
-|---|---|
-| Article text, figures, equations, citations | Standard MyST markdown rendered with `article-theme` |
-| `:::{figure} #kan-fit` and `#kan-loss` | Cell-label references resolved by MyST-NB into the notebook outputs |
-| `{code-cell} python` in `paper.md` | Inline executable cell; Thebe attaches it to the local kernel on first "Run" click |
-| Local kernel | `jupyter server` on `localhost:8888`, token `kan-demo-local`, CORS open to MyST's `localhost:3000` |
-| MyST → kernel binding | `project.thebe.server` block in `myst.yml` |
+The dashboard is shipped as a Docker image. The Dockerfile lives in
+`app/Dockerfile` but the build context is the **repo root** — that's how the
+container sees `pyproject.toml` and `uv.lock`:
 
-The token in `myst.yml` is intentionally fixed and committed — the server is
-only reachable on localhost, so the token authorises nothing outside the
-reader's own machine.
+```bash
+docker build -f app/Dockerfile -t kan-dashboard .
+docker run --rm -p 8050:8050 kan-dashboard
+```
 
-## v0 acceptance criteria
+Inside the image, `uv sync --frozen` installs the exact versions recorded in
+`uv.lock`, so the deployed runtime matches your local one.
 
-- `myst start` renders `paper.md` without warnings about missing labels.
-- `./start.sh` brings up both servers; visiting `http://localhost:3000` shows
-  the article with "Run" affordances on the code cells.
-- Clicking "Run" on `kan-interactive` produces the `model.plot()` matplotlib
-  figure inline within ~10 s on a typical laptop.
+The article remains a static MyST build. The `:::{iframe}` URL in `paper.md`
+is the public URL of the dashboard container; for local dev it is
+`http://localhost:8050/coarse`, for a published deployment it would be (for
+example) `https://kan-app.evidencepub.io/coarse`. Swap the URL in `paper.md`
+and rebuild the article.
 
 ## v1 backlog
 
-- Port `kan-fulltext-demo/scripts/build_fulltext.py` to emit MyST chapters in
-  `content/` so the full paper text travels with the demo.
-- Wrap `kan-interactive` in an `{anywidget}` widget that mirrors the
-  `kan-fulltext-demo` scrubber UI and dispatches its training through the same
-  local Thebe kernel via `thebe-core`'s programmatic API.
-- Pre-execute the notebook with `myst build --execute` so the article still
-  shows useful default outputs when `./start.sh` is not running.
+- One Dash page per remaining training stage (`/refine`, `/sparsify`,
+  `/prune`, `/symbolic`).
+- Target-function picker (Evidence-validated AST allowlist, reused from
+  `kan-fulltext-demo/scripts/kan_engine.py`).
+- Port the full KAN paper text from `kan-fulltext-demo/scripts/build_fulltext.py`
+  into MyST chapters so the demo carries the whole paper, not just a stub.
+- Decide on production hosting for the dashboard container (Evidence infra
+  vs. self-hosted) and pin a stable URL in `paper.md`.

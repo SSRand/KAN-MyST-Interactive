@@ -8,4 +8,7 @@ _build/
 node_modules/
 *.log
 .jupyter/
-uv.lock
+
+# uv.lock is intentionally NOT ignored — it pins the deploy environment.
+# Application repos commit the lockfile so Docker builds and local dev share
+# the exact same resolved versions.

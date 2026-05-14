@@ -1,0 +1,24 @@
+# The Docker build context is the repo root. We ship pyproject.toml, uv.lock,
+# and the app/ source. Everything else is irrelevant to the runtime image.
+.git
+.gitignore
+.venv
+**/.venv
+**/__pycache__
+**/*.pyc
+**/.DS_Store
+**/.ipynb_checkpoints
+_build
+node_modules
+*.log
+.jupyter
+.dockerignore
+Dockerfile
+README.md
+docs
+content
+meetings
+paper.md
+paper.bib
+myst.yml
+start.sh

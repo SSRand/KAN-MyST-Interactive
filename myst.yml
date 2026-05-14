@@ -2,26 +2,19 @@
 version: 1
 project:
   title: 'KAN as a Dynamic Paper'
-  subtitle: An interactive Evidence-style paper, run locally
+  subtitle: An interactive Evidence-style paper backed by a containerised Dash app
   description: >-
-    Live-trainable Kolmogorov-Arnold Network paper rendered with MyST and the
-    Evidence article-theme. The page shows the Evidence reading surface and
-    Thebe-style run buttons, but compute runs against a Jupyter server on the
-    reader's own machine — Evidence's Binder is not in the loop.
+    Kolmogorov-Arnold Network paper rendered with MyST and the Evidence
+    article-theme. The interactive panels are independent Dash routes served
+    by the sibling `app/` container; the paper embeds each one with an
+    `{iframe}` directive next to the relevant prose.
   keywords:
     - kolmogorov-arnold networks
     - dynamic paper
     - reproducible publishing
     - mystmd
-    - thebe
+    - dashboard
   github: https://github.com/SSRand/KAN-MyST-Interactive
-  thebe:
-    # Local Jupyter server booted by ./start.sh. The token below is intentionally
-    # public — it only authorises access to a server bound to localhost.
-    server:
-      url: http://localhost:8888
-      token: kan-demo-local
-    kernelName: python3
   numbering:
     headings: true
   open_access: true
