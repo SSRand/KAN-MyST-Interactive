@@ -2,16 +2,14 @@
 version: 1
 project:
   title: 'KAN as a Dynamic Paper'
-  subtitle: An interactive Evidence-style paper backed by a containerised Dash app
+  subtitle: Interactive Kolmogorov–Arnold Networks
   description: >-
-    Kolmogorov-Arnold Network paper rendered with MyST and the Evidence
-    article-theme. The interactive panels are independent Dash routes served
-    by the sibling `app/` container; the paper embeds each one with an
-    `{iframe}` directive next to the relevant prose.
+    Each section of the paper is paired with an interactive panel that
+    performs the step it describes. The panels are independent routes of a
+    Dash app, embedded here as iframes.
   keywords:
     - kolmogorov-arnold networks
     - dynamic paper
-    - reproducible publishing
     - mystmd
     - dashboard
   github: https://github.com/SSRand/KAN-MyST-Interactive

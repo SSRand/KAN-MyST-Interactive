@@ -1,9 +1,8 @@
-"""Minimal pykan wrapper used by the Dash routes.
+"""Minimal pykan wrappers used by the Dash routes.
 
-Designed so each Dash page calls one function and gets back data + a rendered
-PNG.  No disk side effects, no global state — every request is independent.
-That matches Agah's "URL-resolved modular panels" framing: the kernel of the
-demo (training) is a pure function from (knob settings) to (artifact).
+Every `train_*` function is pure: same inputs → same outputs, no global
+state, no disk side effects. Each Dash page calls one of these and gets back
+loss arrays + a base64-encoded KAN diagram PNG.
 """
 
 from __future__ import annotations
@@ -20,7 +19,7 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("MKL_NUM_THREADS", "1")
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 
-import matplotlib.pyplot as plt  # noqa: E402  must follow MPLBACKEND
+import matplotlib.pyplot as plt  # noqa: E402
 import torch  # noqa: E402
 from kan import KAN, create_dataset  # noqa: E402
 
@@ -32,25 +31,24 @@ def _default_target(x: torch.Tensor) -> torch.Tensor:
     return torch.exp(torch.sin(math.pi * x[:, [0]]) + x[:, [1]] ** 2)
 
 
-def train_coarse(grid: int = 5, steps: int = 20) -> dict[str, Any]:
-    """Train one [2, 5, 1] KAN with the given grid / LBFGS steps.
-
-    Returns:
-        train_loss, test_loss: lists of floats
-        graph_png_b64: data URL ready for <img src=...>
-    """
+def _setup() -> None:
     torch.set_default_dtype(torch.float64)
     torch.set_num_threads(1)
     torch.manual_seed(0)
 
-    dataset = create_dataset(
+
+def _dataset() -> dict[str, torch.Tensor]:
+    return create_dataset(
         _default_target,
         n_var=2,
         train_num=300,
         test_num=300,
         seed=17,
     )
-    model = KAN(
+
+
+def _new_kan(grid: int) -> KAN:
+    return KAN(
         width=[2, 5, 1],
         grid=int(grid),
         k=3,
@@ -59,10 +57,8 @@ def train_coarse(grid: int = 5, steps: int = 20) -> dict[str, Any]:
         auto_save=False,
     )
 
-    history = model.fit(dataset, opt="LBFGS", steps=int(steps), log=10**9)
-    train_loss = [float(x) for x in history.get("train_loss", [])]
-    test_loss = [float(x) for x in history.get("test_loss", [])]
 
+def _render_diagram(model: KAN, dataset: dict, title: str) -> str:
     plt.close("all")
     with tempfile.TemporaryDirectory() as tmp:
         model(dataset["train_input"])
@@ -73,17 +69,59 @@ def train_coarse(grid: int = 5, steps: int = 20) -> dict[str, Any]:
             scale=0.72,
             in_vars=[r"$x$", r"$y$"],
             out_vars=[r"$f(x,y)$"],
-            title=f"KAN  grid={grid}  steps={steps}",
+            title=title,
         )
         buf = io.BytesIO()
         plt.savefig(buf, format="png", bbox_inches="tight", dpi=160, facecolor="white")
         plt.close("all")
+    return f"data:image/png;base64,{base64.b64encode(buf.getvalue()).decode('ascii')}"
 
-    buf.seek(0)
-    png_b64 = base64.b64encode(buf.read()).decode("ascii")
 
+def _losses(history: dict) -> tuple[list[float], list[float]]:
+    train = [float(x) for x in history.get("train_loss", [])]
+    test = [float(x) for x in history.get("test_loss", [])]
+    return train, test
+
+
+def train_coarse(grid: int = 5, steps: int = 20) -> dict[str, Any]:
+    """One [2, 5, 1] KAN fit on the default target."""
+    _setup()
+    dataset = _dataset()
+    model = _new_kan(grid)
+    history = model.fit(dataset, opt="LBFGS", steps=int(steps), log=10**9)
+    train_loss, test_loss = _losses(history)
     return {
         "train_loss": train_loss,
         "test_loss": test_loss,
-        "graph_png_b64": f"data:image/png;base64,{png_b64}",
+        "graph_png_b64": _render_diagram(
+            model, dataset, f"KAN  grid={grid}  steps={steps}"
+        ),
+    }
+
+
+def train_refine(
+    coarse_grid: int = 5,
+    coarse_steps: int = 20,
+    refined_grid: int = 10,
+    refined_steps: int = 20,
+) -> dict[str, Any]:
+    """Coarse fit, then `model.refine()` to a finer spline grid, then continued training."""
+    _setup()
+    dataset = _dataset()
+
+    model = _new_kan(coarse_grid)
+    coarse_history = model.fit(dataset, opt="LBFGS", steps=int(coarse_steps), log=10**9)
+    coarse_train, coarse_test = _losses(coarse_history)
+
+    model = model.refine(int(refined_grid))
+    refined_history = model.fit(dataset, opt="LBFGS", steps=int(refined_steps), log=10**9)
+    refined_train, refined_test = _losses(refined_history)
+
+    return {
+        "train_loss": coarse_train + refined_train,
+        "test_loss": coarse_test + refined_test,
+        "split_at": len(coarse_train),
+        "graph_png_b64": _render_diagram(
+            model, dataset, f"refined  grid={coarse_grid} → {refined_grid}"
+        ),
     }
