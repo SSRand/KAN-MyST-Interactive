@@ -7,6 +7,9 @@ back to back; a dashed line marks the refinement transition.
 
 from __future__ import annotations
 
+import sys
+import traceback
+
 import dash
 import plotly.graph_objects as go
 from dash import Input, Output, State, callback, dcc, html
@@ -136,18 +139,40 @@ layout = html.Div(
     prevent_initial_call=True,
 )
 def _on_train(_n: int, coarse_grid: int, refined_grid: int, steps: int):
+    print(
+        f"[refine] coarse_grid={coarse_grid} refined_grid={refined_grid} steps={steps}",
+        file=sys.stderr,
+        flush=True,
+    )
     if refined_grid <= coarse_grid:
         return html.Div(
             f"Refined grid ({refined_grid}) must be strictly greater than coarse grid ({coarse_grid}).",
             style={"color": "#b91c1c", "padding": "0.5rem 0"},
         )
 
-    result = train_refine(
-        coarse_grid=coarse_grid,
-        coarse_steps=steps,
-        refined_grid=refined_grid,
-        refined_steps=steps,
-    )
+    try:
+        result = train_refine(
+            coarse_grid=coarse_grid,
+            coarse_steps=steps,
+            refined_grid=refined_grid,
+            refined_steps=steps,
+        )
+    except Exception as exc:  # noqa: BLE001 — we want every error visible
+        traceback.print_exc(file=sys.stderr)
+        return html.Pre(
+            f"{exc.__class__.__name__}: {exc}\n\n{traceback.format_exc()}",
+            style={
+                "color": "#b91c1c",
+                "background": "#fef2f2",
+                "padding": "1rem",
+                "borderRadius": "6px",
+                "border": "1px solid #fecaca",
+                "fontSize": "0.78rem",
+                "overflow": "auto",
+                "whiteSpace": "pre-wrap",
+            },
+        )
+
     train_loss = result["train_loss"]
     test_loss = result["test_loss"]
     final_train = train_loss[-1] if train_loss else float("nan")

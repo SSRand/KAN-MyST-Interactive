@@ -26,5 +26,9 @@ project:
     - paper.bib
   resources:
     - content/kan_demo.ipynb
+  # Internal planning / decision notes — not part of the rendered article.
+  exclude:
+    - docs/**
+    - app/**
 site:
   template: article-theme

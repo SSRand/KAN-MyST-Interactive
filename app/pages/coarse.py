@@ -10,6 +10,9 @@ host article column.
 
 from __future__ import annotations
 
+import sys
+import traceback
+
 import dash
 import plotly.graph_objects as go
 from dash import Input, Output, State, callback, dcc, html
@@ -112,7 +115,24 @@ layout = html.Div(
     prevent_initial_call=True,
 )
 def _on_train(_n_clicks: int, grid: int, steps: int):
-    result = train_coarse(grid=grid, steps=steps)
+    print(f"[coarse] grid={grid} steps={steps}", file=sys.stderr, flush=True)
+    try:
+        result = train_coarse(grid=grid, steps=steps)
+    except Exception as exc:  # noqa: BLE001 — we want every error visible
+        traceback.print_exc(file=sys.stderr)
+        return html.Pre(
+            f"{exc.__class__.__name__}: {exc}\n\n{traceback.format_exc()}",
+            style={
+                "color": "#b91c1c",
+                "background": "#fef2f2",
+                "padding": "1rem",
+                "borderRadius": "6px",
+                "border": "1px solid #fecaca",
+                "fontSize": "0.78rem",
+                "overflow": "auto",
+                "whiteSpace": "pre-wrap",
+            },
+        )
     train_loss = result["train_loss"]
     test_loss = result["test_loss"]
     final_train = train_loss[-1] if train_loss else float("nan")
