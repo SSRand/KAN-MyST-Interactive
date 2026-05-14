@@ -50,3 +50,17 @@ back to back; the dashed line on the loss curve marks the transition.
 :width: 100%
 :height: 760px
 :::
+
+## Sparsification
+
+Accuracy is one half of KAN's value proposition; interpretability is the
+other. Adding an L1 + entropy penalty during training shrinks edges that
+carry little signal, so what remains is a smaller, easier-to-read network
+that approximates the same function. The next panel resumes training under
+the penalty and renders the thinned diagram.
+
+:::{iframe} http://localhost:8050/sparsify
+:label: panel-sparsify
+:width: 100%
+:height: 760px
+:::

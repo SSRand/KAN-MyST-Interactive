@@ -44,7 +44,8 @@ container can see `pyproject.toml` and `uv.lock`. Inside the image,
 │   ├── pages/
 │   │   ├── home.py        # /
 │   │   ├── coarse.py      # /coarse
-│   │   └── refine.py      # /refine
+│   │   ├── refine.py      # /refine
+│   │   └── sparsify.py    # /sparsify
 │   ├── Dockerfile
 │   └── README.md
 ├── start.sh

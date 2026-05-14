@@ -107,6 +107,50 @@ def train_coarse(grid: int = 5, steps: int = 20) -> dict[str, Any]:
         }
 
 
+def train_sparsify(
+    coarse_steps: int = 20,
+    lamb: float = 0.002,
+    lamb_entropy: float = 1.0,
+    sparse_steps: int = 20,
+) -> dict[str, Any]:
+    """Coarse fit, then a continued fit under L1 + entropy penalties.
+
+    The first phase fits the KAN normally. The second phase resumes training
+    with `lamb` (overall regularisation) and `lamb_entropy` (entropy weight),
+    which together push activations toward "few large edges" — visibly thins
+    the diagram.
+    """
+    _setup()
+    dataset = _dataset()
+    with tempfile.TemporaryDirectory(prefix="kan-ckpt-") as ckpt_dir:
+        model = _new_kan(grid=5, ckpt_path=ckpt_dir)
+        coarse_history = model.fit(
+            dataset, opt="LBFGS", steps=int(coarse_steps), log=10**9
+        )
+        coarse_train, coarse_test = _losses(coarse_history)
+
+        sparse_history = model.fit(
+            dataset,
+            opt="LBFGS",
+            steps=int(sparse_steps),
+            lamb=float(lamb),
+            lamb_entropy=float(lamb_entropy),
+            log=10**9,
+        )
+        sparse_train, sparse_test = _losses(sparse_history)
+
+        return {
+            "train_loss": coarse_train + sparse_train,
+            "test_loss": coarse_test + sparse_test,
+            "split_at": len(coarse_train),
+            "graph_png_b64": _render_diagram(
+                model,
+                dataset,
+                f"sparsified  λ={lamb:.4g}  H={lamb_entropy:g}",
+            ),
+        }
+
+
 def train_refine(
     coarse_grid: int = 5,
     coarse_steps: int = 20,

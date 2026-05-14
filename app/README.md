@@ -8,6 +8,7 @@ Each route is one focused panel; the article iframes them individually.
 | `/` | Index of panels |
 | `/coarse` | Coarse `[2, 5, 1]` KAN fit |
 | `/refine` | Coarse fit + spline grid refinement |
+| `/sparsify` | Coarse fit + continued training under L1 + entropy penalty |
 
 ## Local development
 
