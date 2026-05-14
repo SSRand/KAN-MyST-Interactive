@@ -1,11 +1,13 @@
-"""`/coarse` panel — minimum-viable interactive KAN fit.
+"""`/coarse` panel — the entry point of the training pipeline.
 
-Visible knobs: spline grid size, LBFGS step count. One button triggers a fresh
-training run; the result is a KAN graph image plus a loss curve.
+This is the only panel where the target function is editable. The expression
+is typed into a text field whose contents are rendered as MathJax in real
+time, then the Train button fits a `[2, 5, 1]` KAN at the chosen grid /
+LBFGS steps and shows the diagram + loss curve.
 
-This page is designed to render fine inside an `<iframe>` — no top nav,
-self-contained controls, and a fixed maximum width so it doesn't overflow the
-host article column.
+Subsequent panels (`/refine`, `/sparsify`, `/prune`, `/symbolic`) do not let
+the reader change the target; they train on the same default expression.
+That mirrors how a printed paper would read: the target is declared once.
 """
 
 from __future__ import annotations
@@ -16,10 +18,21 @@ import traceback
 import dash
 from dash import Input, Output, State, callback, dcc, html
 
-from figures import error_panel, loss_figure, target_input
-from kan_core import DEFAULT_EXPRESSION, train_coarse
+from figures import error_panel, loss_figure
+from kan_core import DEFAULT_EXPRESSION, expression_to_latex_body, train_coarse
 
 dash.register_page(__name__, path="/coarse", title="Coarse KAN fit", name="Coarse fit")
+
+
+_INPUT_STYLE = {
+    "width": "100%",
+    "padding": "0.45rem 0.7rem",
+    "fontFamily": "ui-monospace, SFMono-Regular, Menlo, monospace",
+    "fontSize": "0.92rem",
+    "borderRadius": "5px",
+    "border": "1px solid #cbd5e1",
+    "boxSizing": "border-box",
+}
 
 
 layout = html.Div(
@@ -34,10 +47,37 @@ layout = html.Div(
             html.Code("sin, cos, tan, tanh, exp, log, sqrt, abs, x, y, pi, e"),
             style={"color": "#475569", "fontSize": "0.85rem", "marginTop": 0},
         ),
+        # Target block: label, editable input, live LaTeX preview.
         html.Div(
-            style={"display": "grid", "gridTemplateColumns": "150px 1fr", "rowGap": "0.6rem", "columnGap": "1rem", "alignItems": "center"},
+            style={"marginTop": "1rem", "marginBottom": "1.2rem"},
             children=[
-                *target_input("coarse-expr", DEFAULT_EXPRESSION),
+                html.Label(
+                    "Target  f(x, y)",
+                    style={"display": "block", "marginBottom": "0.4rem", "fontWeight": 500},
+                ),
+                dcc.Input(
+                    id="coarse-expr",
+                    type="text",
+                    value=DEFAULT_EXPRESSION,
+                    placeholder="exp(sin(pi*x) + y**2)",
+                    debounce=False,  # update on every keystroke for live render
+                    style=_INPUT_STYLE,
+                ),
+                dcc.Markdown(
+                    id="coarse-expr-rendered",
+                    mathjax=True,
+                    style={
+                        "marginTop": "0.55rem",
+                        "minHeight": "1.6rem",
+                        "color": "#0f172a",
+                        "fontSize": "1.02rem",
+                    },
+                ),
+            ],
+        ),
+        html.Div(
+            style={"display": "grid", "gridTemplateColumns": "120px 1fr", "rowGap": "0.6rem", "columnGap": "1rem", "alignItems": "center"},
+            children=[
                 html.Label("Grid"),
                 dcc.Slider(
                     id="coarse-grid",
@@ -83,13 +123,30 @@ layout = html.Div(
                 id="coarse-output",
                 style={"marginTop": "1.2rem"},
                 children=html.P(
-                    "Click Train to fit a KAN with the chosen grid and step count.",
+                    "Click Train to fit a KAN with the chosen target, grid, and step count.",
                     style={"color": "#666", "fontStyle": "italic"},
                 ),
             ),
         ),
     ],
 )
+
+
+@callback(
+    Output("coarse-expr-rendered", "children"),
+    Input("coarse-expr", "value"),
+)
+def _live_render(expression: str | None) -> str:
+    """Re-render the expression as inline MathJax on every keystroke."""
+    if not expression or not expression.strip():
+        return ""
+    try:
+        body = expression_to_latex_body(expression)
+    except ValueError as exc:
+        return f"⚠️ {exc}"
+    except Exception as exc:  # noqa: BLE001 — sympy can raise lots of things
+        return f"⚠️ {exc.__class__.__name__}: {exc}"
+    return f"$$f(x, y) = {body}$$"
 
 
 @callback(

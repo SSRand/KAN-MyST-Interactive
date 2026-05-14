@@ -81,6 +81,25 @@ def validate_expression(expression: str) -> str:
     return normalised
 
 
+def expression_to_latex_body(expression: str) -> str:
+    """Format a (validated) user expression as LaTeX.
+
+    Returns just the right-hand side; callers wrap it in `f(x, y) = ...` if
+    they want the full identity. Raises ValueError if the expression isn't
+    in the AST allowlist; any sympy-level conversion error is propagated as
+    a generic Exception.
+    """
+    normalised = validate_expression(expression)
+    import sympy
+
+    x_sym, y_sym = sympy.symbols("x y")
+    expr = sympy.sympify(
+        normalised,
+        locals={"x": x_sym, "y": y_sym, "pi": sympy.pi, "e": sympy.E},
+    )
+    return sympy.latex(expr)
+
+
 def make_target(expression: str) -> Callable[[torch.Tensor], torch.Tensor]:
     """Compile a validated expression to a torch-friendly target function."""
     normalised = validate_expression(expression)
@@ -109,6 +128,12 @@ def make_target(expression: str) -> Callable[[torch.Tensor], torch.Tensor]:
 
     target_fn.expression = normalised  # type: ignore[attr-defined]
     return target_fn
+
+
+try:
+    DEFAULT_LATEX = expression_to_latex_body(DEFAULT_EXPRESSION)
+except Exception:
+    DEFAULT_LATEX = DEFAULT_EXPRESSION
 
 
 def _setup() -> None:
@@ -144,23 +169,79 @@ def _new_kan(grid: int, ckpt_path: str) -> KAN:
     )
 
 
-def _render_diagram(model: KAN, dataset: dict, title: str) -> str:
+def _png_to_data_url(buf: io.BytesIO) -> str:
+    buf.seek(0)
+    return f"data:image/png;base64,{base64.b64encode(buf.read()).decode('ascii')}"
+
+
+def _render_placeholder(title: str, exc: BaseException) -> str:
+    """Fallback PNG shown when pykan's plot can't render this model."""
     plt.close("all")
-    with tempfile.TemporaryDirectory() as tmp:
-        model(dataset["train_input"])
-        model.plot(
-            folder=tmp,
-            beta=8,
-            metric="forward_n",
-            scale=0.72,
-            in_vars=[r"$x$", r"$y$"],
-            out_vars=[r"$f(x,y)$"],
-            title=title,
-        )
-        buf = io.BytesIO()
-        plt.savefig(buf, format="png", bbox_inches="tight", dpi=160, facecolor="white")
+    fig, ax = plt.subplots(figsize=(7, 2.6))
+    ax.text(
+        0.5, 0.7,
+        f"{title} — diagram unavailable",
+        ha="center", va="center",
+        transform=ax.transAxes,
+        fontsize=13, fontweight="bold", color="#475569",
+    )
+    ax.text(
+        0.5, 0.35,
+        f"pykan plot raised {exc.__class__.__name__}: {str(exc)[:160]}",
+        ha="center", va="center",
+        transform=ax.transAxes,
+        fontsize=9, color="#94a3b8",
+    )
+    ax.text(
+        0.5, 0.12,
+        "(loss curve and metrics below are still valid)",
+        ha="center", va="center",
+        transform=ax.transAxes,
+        fontsize=8, color="#cbd5e1",
+    )
+    ax.set_axis_off()
+    buf = io.BytesIO()
+    plt.savefig(buf, format="png", bbox_inches="tight", dpi=160, facecolor="white")
+    plt.close("all")
+    return _png_to_data_url(buf)
+
+
+def _render_diagram(model: KAN, dataset: dict, title: str) -> str:
+    """Render the KAN diagram with a graceful fallback.
+
+    pykan's `plot()` divides by `acts_scale_spline.sum()` to normalise edge
+    transparency. After aggressive pruning that sum can be zero, which makes
+    alpha NaN and matplotlib then refuses to draw. We try `metric="forward_n"`
+    first (informative when it works), fall back to the default metric on
+    failure, and finally render a text placeholder if both fail — so a single
+    bad configuration never blanks the whole panel.
+    """
+    plt.close("all")
+    model(dataset["train_input"])  # populate forward-pass stats for plot()
+
+    last_exc: BaseException | None = None
+    for overrides in ({"metric": "forward_n"}, {}):
         plt.close("all")
-    return f"data:image/png;base64,{base64.b64encode(buf.getvalue()).decode('ascii')}"
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                model.plot(
+                    folder=tmp,
+                    beta=8,
+                    scale=0.72,
+                    in_vars=[r"$x$", r"$y$"],
+                    out_vars=[r"$f(x,y)$"],
+                    title=title,
+                    **overrides,
+                )
+                buf = io.BytesIO()
+                plt.savefig(buf, format="png", bbox_inches="tight", dpi=160, facecolor="white")
+                plt.close("all")
+                return _png_to_data_url(buf)
+        except Exception as exc:  # noqa: BLE001 — every diagram path is best-effort
+            last_exc = exc
+
+    assert last_exc is not None
+    return _render_placeholder(title, last_exc)
 
 
 def _losses(history: dict) -> tuple[list[float], list[float]]:
