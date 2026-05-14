@@ -12,6 +12,7 @@ import io
 import math
 import os
 import tempfile
+from pathlib import Path
 from typing import Any
 
 os.environ.setdefault("MPLBACKEND", "Agg")
@@ -47,7 +48,12 @@ def _dataset() -> dict[str, torch.Tensor]:
     )
 
 
-def _new_kan(grid: int) -> KAN:
+def _new_kan(grid: int, ckpt_path: str) -> KAN:
+    """Build a fresh KAN. `ckpt_path` must point at an existing directory:
+    pykan's `fit()` calls `log_history` which opens `<ckpt_path>/history.txt`
+    in append mode and that errors if the directory is missing, even when
+    `auto_save=False`.
+    """
     return KAN(
         width=[2, 5, 1],
         grid=int(grid),
@@ -55,6 +61,7 @@ def _new_kan(grid: int) -> KAN:
         seed=0,
         device=torch.device("cpu"),
         auto_save=False,
+        ckpt_path=ckpt_path,
     )
 
 
@@ -87,16 +94,17 @@ def train_coarse(grid: int = 5, steps: int = 20) -> dict[str, Any]:
     """One [2, 5, 1] KAN fit on the default target."""
     _setup()
     dataset = _dataset()
-    model = _new_kan(grid)
-    history = model.fit(dataset, opt="LBFGS", steps=int(steps), log=10**9)
-    train_loss, test_loss = _losses(history)
-    return {
-        "train_loss": train_loss,
-        "test_loss": test_loss,
-        "graph_png_b64": _render_diagram(
-            model, dataset, f"KAN  grid={grid}  steps={steps}"
-        ),
-    }
+    with tempfile.TemporaryDirectory(prefix="kan-ckpt-") as ckpt_dir:
+        model = _new_kan(grid, ckpt_path=ckpt_dir)
+        history = model.fit(dataset, opt="LBFGS", steps=int(steps), log=10**9)
+        train_loss, test_loss = _losses(history)
+        return {
+            "train_loss": train_loss,
+            "test_loss": test_loss,
+            "graph_png_b64": _render_diagram(
+                model, dataset, f"KAN  grid={grid}  steps={steps}"
+            ),
+        }
 
 
 def train_refine(
@@ -109,19 +117,24 @@ def train_refine(
     _setup()
     dataset = _dataset()
 
-    model = _new_kan(coarse_grid)
-    coarse_history = model.fit(dataset, opt="LBFGS", steps=int(coarse_steps), log=10**9)
-    coarse_train, coarse_test = _losses(coarse_history)
+    with tempfile.TemporaryDirectory(prefix="kan-ckpt-") as ckpt_dir:
+        model = _new_kan(coarse_grid, ckpt_path=ckpt_dir)
+        coarse_history = model.fit(dataset, opt="LBFGS", steps=int(coarse_steps), log=10**9)
+        coarse_train, coarse_test = _losses(coarse_history)
 
-    model = model.refine(int(refined_grid))
-    refined_history = model.fit(dataset, opt="LBFGS", steps=int(refined_steps), log=10**9)
-    refined_train, refined_test = _losses(refined_history)
+        model = model.refine(int(refined_grid))
+        # `refine()` returns a fresh KAN whose ckpt_path resets to pykan's
+        # default ('./model'), which may not exist. Pin it back to our tempdir.
+        model.ckpt_path = ckpt_dir
 
-    return {
-        "train_loss": coarse_train + refined_train,
-        "test_loss": coarse_test + refined_test,
-        "split_at": len(coarse_train),
-        "graph_png_b64": _render_diagram(
-            model, dataset, f"refined  grid={coarse_grid} → {refined_grid}"
-        ),
-    }
+        refined_history = model.fit(dataset, opt="LBFGS", steps=int(refined_steps), log=10**9)
+        refined_train, refined_test = _losses(refined_history)
+
+        return {
+            "train_loss": coarse_train + refined_train,
+            "test_loss": coarse_test + refined_test,
+            "split_at": len(coarse_train),
+            "graph_png_b64": _render_diagram(
+                model, dataset, f"refined  grid={coarse_grid} → {refined_grid}"
+            ),
+        }
